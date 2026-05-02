@@ -1,125 +1,122 @@
-package com.github.yournamehere;
+package com.aliucord.plugins;
 
 import android.content.Context;
-
-import androidx.annotation.NonNull;
-
+import android.media.MediaMetadataRetriever;
+import android.widget.Toast;
+import com.aliucord.Logger;
 import com.aliucord.Utils;
 import com.aliucord.annotations.AliucordPlugin;
 import com.aliucord.api.CommandsAPI;
-import com.aliucord.entities.MessageEmbedBuilder;
 import com.aliucord.entities.Plugin;
-import com.aliucord.patcher.*;
-import com.aliucord.wrappers.embeds.MessageEmbedWrapper;
-import com.discord.api.commands.ApplicationCommandType;
-import com.discord.api.message.embed.MessageEmbed;
-import com.discord.models.user.CoreUser;
-import com.discord.stores.StoreUserTyping;
-import com.discord.widgets.chat.list.adapter.WidgetChatListAdapterItemMessage;
-import com.discord.widgets.chat.list.entries.ChatListEntry;
-import com.discord.widgets.chat.list.entries.MessageEntry;
+import com.discord.stores.StoreStream;
+import java.io.*;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.util.*;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
-import java.util.Arrays;
-import java.util.Iterator;
+@AliucordPlugin
+public class Mp3VoiceMessage extends Plugin {
+    private final Logger logger = new Logger("Mp3VoiceMessage");
+    private static final String BASE_URL = "https://discord.com/api/v9";
+    private static final int VOICE_MESSAGE_FLAG = 8192;
+    private static final String WAVEFORM_PLACEHOLDER = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 
-// Aliucord Plugin annotation. Must be present on the main class of your plugin
-// Plugin class. Must extend Plugin and override start and stop
-// Learn more: https://github.com/Aliucord/documentation/blob/main/plugin-dev/1_introduction.md#basic-plugin-structure
-@AliucordPlugin(
-    requiresRestart = false // Whether your plugin requires a restart after being installed/updated
-)
-@SuppressWarnings("unused")
-public class MyFirstJavaPlugin extends Plugin {
     @Override
-    public void start(@NonNull Context context) throws Throwable {
-        // Register a command with the name hello and description "My first command!" and no arguments.
-        // Learn more: https://github.com/Aliucord/documentation/blob/main/plugin-dev/2_commands.md
-        commands.registerCommand("hello", "My first command!", ctx -> {
-            // Just return a command result with hello world as the content
-            return new CommandsAPI.CommandResult(
-                "Hello World!",
-                null, // List of embeds
-                false // Whether to send visible for everyone
-            );
-        });
+    public void start(Context ctx) throws Throwable {
+        commands.registerCommand("sendmp3", "Send an MP3 as a voice message",
+            Collections.singletonList(new CommandsAPI.CommandOption(CommandsAPI.CommandOption.Type.STRING, "url", "Direct URL to MP3", true)),
+            ctx2 -> {
+                String mp3Url = (String) ctx2.get("url");
+                if (mp3Url == null || mp3Url.isEmpty())
+                    return new CommandsAPI.CommandResult("Please provide an MP3 URL.", null, false);
+                long channelId = StoreStream.getChannelsSelected().getId();
+                if (channelId == 0)
+                    return new CommandsAPI.CommandResult("Could not determine current channel.", null, false);
+                ExecutorService executor = Executors.newSingleThreadExecutor();
+                executor.execute(() -> {
+                    try { sendMp3AsVoiceMessage(ctx, mp3Url, channelId); }
+                    catch (Exception e) {
+                        logger.error("Failed", e);
+                        Utils.mainThread.post(() -> Toast.makeText(ctx, "Failed: " + e.getMessage(), Toast.LENGTH_LONG).show());
+                    }
+                });
+                return new CommandsAPI.CommandResult("Sending MP3 as voice message...", null, false);
+            });
+    }
 
-        // A bit more advanced command with arguments
-        commands.registerCommand(
-            "hellowitharguments",
-            "Hello World but with arguments!",
-            Arrays.asList(
-                Utils.createCommandOption(ApplicationCommandType.STRING, "name", "Person to say hello to"),
-                Utils.createCommandOption(ApplicationCommandType.USER, "user", "User to say hello to")
-            ),
-            ctx -> {
-                String username;
+    private void sendMp3AsVoiceMessage(Context ctx, String mp3Url, long channelId) throws Exception {
+        byte[] mp3Bytes = downloadBytes(mp3Url);
+        if (mp3Bytes == null || mp3Bytes.length == 0) throw new Exception("Failed to download MP3");
+        long durationMs = getDurationMs(ctx, mp3Bytes);
+        double durationSecs = durationMs > 0 ? durationMs / 1000.0 : 1.0;
+        String token = StoreStream.getUsers().getMe().getToken();
+        String filename = "voice-message.ogg";
+        String endpoint = BASE_URL + "/channels/" + channelId + "/messages";
+        String boundary = "----WebKitFormBoundary" + UUID.randomUUID().toString().replace("-", "");
+        org.json.JSONObject attachmentBody = new org.json.JSONObject();
+        attachmentBody.put("id", "0");
+        attachmentBody.put("filename", filename);
+        attachmentBody.put("waveform", WAVEFORM_PLACEHOLDER);
+        attachmentBody.put("duration_secs", durationSecs);
+        org.json.JSONArray attachments = new org.json.JSONArray();
+        attachments.put(attachmentBody);
+        org.json.JSONObject payload = new org.json.JSONObject();
+        payload.put("flags", VOICE_MESSAGE_FLAG);
+        payload.put("channel_id", channelId);
+        payload.put("content", "");
+        payload.put("nonce", String.valueOf((System.currentTimeMillis() - 1420070400000L) << 22));
+        payload.put("type", 0);
+        payload.put("attachments", attachments);
+        HttpURLConnection conn = (HttpURLConnection) new URL(endpoint).openConnection();
+        conn.setRequestMethod("POST");
+        conn.setDoOutput(true);
+        conn.setRequestProperty("Authorization", token);
+        conn.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
+        conn.setRequestProperty("User-Agent", "Discord-Android/175207;RNA");
+        OutputStream out = conn.getOutputStream();
+        String payloadPart = "--" + boundary + "\r\nContent-Disposition: form-data; name=\"payload_json\"\r\n\r\n" + payload + "\r\n";
+        out.write(payloadPart.getBytes(StandardCharsets.UTF_8));
+        String fileHeader = "--" + boundary + "\r\nContent-Disposition: form-data; name=\"files[0]\"; filename=\"" + filename + "\"\r\nContent-Type: audio/mpeg\r\n\r\n";
+        out.write(fileHeader.getBytes(StandardCharsets.UTF_8));
+        out.write(mp3Bytes);
+        out.write(("\r\n--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8));
+        out.flush(); out.close();
+        int code = conn.getResponseCode();
+        if (code == 200 || code == 201)
+            Utils.mainThread.post(() -> Toast.makeText(ctx, "Voice message sent!", Toast.LENGTH_SHORT).show());
+        else {
+            InputStream err = conn.getErrorStream();
+            String body = err != null ? new String(err.readAllBytes(), StandardCharsets.UTF_8) : "no body";
+            throw new Exception("HTTP " + code + ": " + body);
+        }
+    }
 
-                // Check if a user argument was passed
-                if (ctx.containsArg("user")) {
-                    username = ctx.getRequiredUser("user").getUsername();
-                } else {
-                    // Returns either the argument value if present, or the defaultValue ("World" in this case)
-                    username = ctx.getStringOrDefault("name", "World");
-                }
+    private byte[] downloadBytes(String urlStr) throws Exception {
+        HttpURLConnection conn = (HttpURLConnection) new URL(urlStr).openConnection();
+        conn.setConnectTimeout(15000); conn.setReadTimeout(30000); conn.connect();
+        if (conn.getResponseCode() != 200) throw new Exception("Download failed: HTTP " + conn.getResponseCode());
+        try (InputStream in = conn.getInputStream(); ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
+            byte[] buf = new byte[8192]; int read;
+            while ((read = in.read(buf)) != -1) baos.write(buf, 0, read);
+            return baos.toByteArray();
+        }
+    }
 
-                // Return the final result that will be displayed in chat as a response to the command
-                return new CommandsAPI.CommandResult("Hello " + username + "!");
-            }
-        );
-
-        // Patch that adds an embed with message statistics to each message
-        // Patched method is WidgetChatListAdapterItemMessage.onConfigure(int type, ChatListEntry entry)
-        patcher.patch(WidgetChatListAdapterItemMessage.class.getDeclaredMethod("onConfigure", int.class, ChatListEntry.class), new Hook(param -> {
-            // see https://api.xposed.info/reference/de/robv/android/xposed/XC_MethodHook.MethodHookParam.html
-            // Obtain the second argument passed to the method, so the ChatListEntry
-            // Because this is a Message item, it will always be a MessageEntry, so cast it to that
-            var entry = (MessageEntry) param.args[1];
-            var message = entry.getMessage();
-
-            // You need to be careful when messing with messages, because they may be loading
-            // (user sent a message, and it is currently sending)
-            if (message.isLoading()) return;
-
-            // Now add an embed with the statistics
-
-            // This method may be called multiple times per message, e.g. if it is edited,
-            // so first remove existing embeds.
-            Iterator<MessageEmbed> embedIterator = message.getEmbeds().iterator();
-            while (embedIterator.hasNext()) {
-                MessageEmbedWrapper embed = new MessageEmbedWrapper(embedIterator.next());
-
-                if ("Message Statistics".equals(embed.getTitle()))
-                    embedIterator.remove();
-            }
-
-            // Creating embeds is a pain, so Aliucord provides a convenient builder
-            var embed = new MessageEmbedBuilder()
-                .setTitle("Message Statistics")
-                .addField("Length", message.getContent() != null ? Integer.toString(message.getContent().length()) : "0", false)
-                .addField("ID", Long.toString(message.getId()), false).build();
-
-            message.getEmbeds().add(embed);
-        }));
-
-        // Patch that renames Juby to JoobJoob
-        patcher.patch(
-            CoreUser.class.getDeclaredMethod("getUsername"),
-            new PreHook(param -> { // see https://api.xposed.info/reference/de/robv/android/xposed/XC_MethodHook.MethodHookParam.html
-                if (((CoreUser) param.thisObject).getId() == 925141667688878090L) {
-                    // setResult() in before patches skips original method invocation
-                    param.setResult("JoobJoob");
-                }
-            })
-        );
-
-        // Patch that hides your typing status by replacing the method and simply doing nothing
-        // This patches the method StoreUserTyping.setUserTyping(long channelId)
-        patcher.patch(StoreUserTyping.class.getDeclaredMethod("setUserTyping", long.class), InsteadHook.DO_NOTHING);
+    private long getDurationMs(Context ctx, byte[] mp3Bytes) {
+        try {
+            File tmpFile = File.createTempFile("mp3vm_", ".mp3", ctx.getCacheDir());
+            try (FileOutputStream fos = new FileOutputStream(tmpFile)) { fos.write(mp3Bytes); }
+            MediaMetadataRetriever mmr = new MediaMetadataRetriever();
+            mmr.setDataSource(tmpFile.getAbsolutePath());
+            String dur = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION);
+            mmr.release(); tmpFile.delete();
+            return dur != null ? Long.parseLong(dur) : 0;
+        } catch (Exception e) { return 0; }
     }
 
     @Override
-    public void stop(@NonNull Context context) {
-        // Remove all patches
-        patcher.unpatchAll();
-    }
+    public void stop(Context ctx) { commands.unregisterAll(); }
 }
