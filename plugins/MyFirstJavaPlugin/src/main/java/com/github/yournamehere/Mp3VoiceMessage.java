@@ -9,6 +9,7 @@ import com.aliucord.annotations.AliucordPlugin;
 import com.aliucord.api.CommandsAPI;
 import com.aliucord.entities.Plugin;
 import com.discord.stores.StoreStream;
+import com.discord.api.commands.ApplicationCommandType;
 import java.io.*;
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -28,18 +29,14 @@ public class Mp3VoiceMessage extends Plugin {
     public void start(Context ctx) throws Throwable {
         commands.registerCommand("sendmp3", "Send an MP3 as a voice message",
             Collections.singletonList(new CommandsAPI.CommandOption(
-                com.discord.api.commands.ApplicationCommandType.STRING,
-                "url",
-                "Direct URL to MP3",
-                null, null, true, false
+                ApplicationCommandType.STRING, "url", "Direct URL to MP3", null, null, true, false
             )),
             ctx2 -> {
                 String mp3Url = ctx2.getRequiredString("url");
                 long channelId = StoreStream.getChannelsSelected().getId();
                 if (channelId == 0)
                     return new CommandsAPI.CommandResult("Could not determine current channel.", null, false);
-                ExecutorService executor = Executors.newSingleThreadExecutor();
-                executor.execute(() -> {
+                Executors.newSingleThreadExecutor().execute(() -> {
                     try { sendMp3AsVoiceMessage(ctx, mp3Url, channelId); }
                     catch (Exception e) {
                         logger.error("Failed", e);
