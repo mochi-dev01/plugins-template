@@ -5,23 +5,21 @@ import android.media.MediaMetadataRetriever;
 import android.widget.Toast;
 import com.aliucord.Logger;
 import com.aliucord.Utils;
+import com.aliucord.Http;
 import com.aliucord.annotations.AliucordPlugin;
-import com.aliucord.api.CommandsAPI;
 import com.aliucord.api.CommandsAPI.CommandResult;
 import com.aliucord.entities.Plugin;
 import com.discord.api.commands.ApplicationCommandType;
 import com.discord.stores.StoreStream;
+import org.json.JSONArray;
+import org.json.JSONObject;
 import java.io.*;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.Executors;
 
 @AliucordPlugin
 public class Mp3VoiceMessage extends Plugin {
     private final Logger logger = new Logger("Mp3VoiceMessage");
-    private static final String BASE_URL = "https://discord.com/api/v9";
     private static final int VOICE_MESSAGE_FLAG = 8192;
     private static final String WAVEFORM_PLACEHOLDER = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 
@@ -52,57 +50,44 @@ public class Mp3VoiceMessage extends Plugin {
         if (mp3Bytes == null || mp3Bytes.length == 0) throw new Exception("Failed to download MP3");
         long durationMs = getDurationMs(ctx, mp3Bytes);
         double durationSecs = durationMs > 0 ? durationMs / 1000.0 : 1.0;
-        String token = StoreStream.getUsers().getMe().getToken();
         String filename = "voice-message.ogg";
-        long channelIdLong = channelId;
-        String endpoint = BASE_URL + "/channels/" + channelIdLong + "/messages";
-        String boundary = "----WebKitFormBoundary" + UUID.randomUUID().toString().replace("-", "");
-        org.json.JSONObject attachmentBody = new org.json.JSONObject();
+
+        JSONObject attachmentBody = new JSONObject();
         attachmentBody.put("id", "0");
         attachmentBody.put("filename", filename);
         attachmentBody.put("waveform", WAVEFORM_PLACEHOLDER);
         attachmentBody.put("duration_secs", durationSecs);
-        org.json.JSONArray attachments = new org.json.JSONArray();
+        JSONArray attachments = new JSONArray();
         attachments.put(attachmentBody);
-        org.json.JSONObject payload = new org.json.JSONObject();
+        JSONObject payload = new JSONObject();
         payload.put("flags", VOICE_MESSAGE_FLAG);
-        payload.put("channel_id", String.valueOf(channelIdLong));
+        payload.put("channel_id", String.valueOf(channelId));
         payload.put("content", "");
         payload.put("nonce", String.valueOf((System.currentTimeMillis() - 1420070400000L) << 22));
         payload.put("type", 0);
         payload.put("attachments", attachments);
-        HttpURLConnection conn = (HttpURLConnection) new URL(endpoint).openConnection();
-        conn.setRequestMethod("POST");
-        conn.setDoOutput(true);
-        conn.setRequestProperty("Authorization", token);
-        conn.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
-        conn.setRequestProperty("User-Agent", "Discord-Android/175207;RNA");
-        conn.setRequestProperty("X-Super-Properties", "eyJvcyI6IkFuZHJvaWQiLCJicm93c2VyIjoiRGlzY29yZCBBbmRyb2lkIn0=");
-        OutputStream out = conn.getOutputStream();
-        out.write(("--" + boundary + "\r\nContent-Disposition: form-data; name=\"payload_json\"\r\n\r\n" + payload + "\r\n").getBytes(StandardCharsets.UTF_8));
-        out.write(("--" + boundary + "\r\nContent-Disposition: form-data; name=\"files[0]\"; filename=\"" + filename + "\"\r\nContent-Type: audio/mpeg\r\n\r\n").getBytes(StandardCharsets.UTF_8));
-        out.write(mp3Bytes);
-        out.write(("\r\n--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8));
-        out.flush(); out.close();
-        int code = conn.getResponseCode();
+
+        String boundary = "----WebKitFormBoundary" + UUID.randomUUID().toString().replace("-", "");
+        ByteArrayOutputStream body = new ByteArrayOutputStream();
+        body.write(("--" + boundary + "\r\nContent-Disposition: form-data; name=\"payload_json\"\r\nContent-Type: application/json\r\n\r\n" + payload + "\r\n").getBytes());
+        body.write(("--" + boundary + "\r\nContent-Disposition: form-data; name=\"files[0]\"; filename=\"" + filename + "\"\r\nContent-Type: audio/mpeg\r\n\r\n").getBytes());
+        body.write(mp3Bytes);
+        body.write(("\r\n--" + boundary + "--\r\n").getBytes());
+
+        var req = new Http.Request("https://discord.com/api/v9/channels/" + channelId + "/messages", "POST")
+            .setHeader("Content-Type", "multipart/form-data; boundary=" + boundary);
+        req.conn.setDoOutput(true);
+        req.conn.getOutputStream().write(body.toByteArray());
+        var res = req.execute();
+        int code = res.statusCode;
         if (code == 200 || code == 201)
             Utils.mainThread.post(() -> Toast.makeText(ctx, "Voice message sent!", Toast.LENGTH_SHORT).show());
-        else {
-            InputStream err = conn.getErrorStream();
-            String body = err != null ? new String(err.readAllBytes(), StandardCharsets.UTF_8) : "no body";
-            throw new Exception("HTTP " + code + ": " + body);
-        }
+        else
+            throw new Exception("HTTP " + code + ": " + res.text());
     }
 
     private byte[] downloadBytes(String urlStr) throws Exception {
-        HttpURLConnection conn = (HttpURLConnection) new URL(urlStr).openConnection();
-        conn.setConnectTimeout(15000); conn.setReadTimeout(30000); conn.connect();
-        if (conn.getResponseCode() != 200) throw new Exception("Download failed: HTTP " + conn.getResponseCode());
-        try (InputStream in = conn.getInputStream(); ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
-            byte[] buf = new byte[8192]; int read;
-            while ((read = in.read(buf)) != -1) baos.write(buf, 0, read);
-            return baos.toByteArray();
-        }
+        return new Http.Request(urlStr, "GET").execute().binaryBody;
     }
 
     private long getDurationMs(Context ctx, byte[] mp3Bytes) {
