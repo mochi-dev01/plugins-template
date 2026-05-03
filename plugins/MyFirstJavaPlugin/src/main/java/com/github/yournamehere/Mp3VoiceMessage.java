@@ -52,7 +52,7 @@ public class Mp3VoiceMessage extends Plugin {
         if (mp3Bytes == null || mp3Bytes.length == 0) throw new Exception("Failed to download MP3");
         long durationMs = getDurationMs(ctx, mp3Bytes);
         double durationSecs = durationMs > 0 ? durationMs / 1000.0 : 1.0;
-        String token = StoreStream.getUsers().getMe().getToken();
+        String token = com.aliucord.Http.getDefaultHeaders().get("Authorization");
         String filename = "voice-message.ogg";
         String endpoint = BASE_URL + "/channels/" + channelId + "/messages";
         String boundary = "----WebKitFormBoundary" + UUID.randomUUID().toString().replace("-", "");
