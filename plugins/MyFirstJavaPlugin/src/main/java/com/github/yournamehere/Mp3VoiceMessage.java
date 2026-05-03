@@ -9,7 +9,6 @@ import com.aliucord.annotations.AliucordPlugin;
 import com.aliucord.api.CommandsAPI;
 import com.aliucord.entities.Plugin;
 import com.discord.stores.StoreStream;
-import com.discord.api.commands.ApplicationCommandType;
 import java.io.*;
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -28,8 +27,8 @@ public class Mp3VoiceMessage extends Plugin {
     @Override
     public void start(Context ctx) throws Throwable {
         commands.registerCommand("sendmp3", "Send an MP3 as a voice message",
-            Collections.singletonList(new CommandsAPI.CommandOption(
-                ApplicationCommandType.STRING, "url", "Direct URL to MP3", null, null, true, false
+            Collections.singletonList(Utils.createCommandOption(
+                com.discord.api.commands.ApplicationCommandType.STRING, "url", "Direct URL to MP3"
             )),
             ctx2 -> {
                 String mp3Url = ctx2.getRequiredString("url");
