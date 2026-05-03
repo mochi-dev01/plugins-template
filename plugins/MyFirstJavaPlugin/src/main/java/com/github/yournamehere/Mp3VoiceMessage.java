@@ -1,4 +1,4 @@
-package com.aliucord.plugins;
+package com.github.yournamehere;
 
 import android.content.Context;
 import android.media.MediaMetadataRetriever;
@@ -27,11 +27,14 @@ public class Mp3VoiceMessage extends Plugin {
     @Override
     public void start(Context ctx) throws Throwable {
         commands.registerCommand("sendmp3", "Send an MP3 as a voice message",
-            Collections.singletonList(new CommandsAPI.CommandOption(CommandsAPI.CommandOption.Type.STRING, "url", "Direct URL to MP3", true)),
+            Collections.singletonList(new CommandsAPI.CommandOption(
+                com.discord.api.commands.ApplicationCommandType.STRING,
+                "url",
+                "Direct URL to MP3",
+                null, null, true, false
+            )),
             ctx2 -> {
-                String mp3Url = (String) ctx2.get("url");
-                if (mp3Url == null || mp3Url.isEmpty())
-                    return new CommandsAPI.CommandResult("Please provide an MP3 URL.", null, false);
+                String mp3Url = ctx2.getRequiredString("url");
                 long channelId = StoreStream.getChannelsSelected().getId();
                 if (channelId == 0)
                     return new CommandsAPI.CommandResult("Could not determine current channel.", null, false);
