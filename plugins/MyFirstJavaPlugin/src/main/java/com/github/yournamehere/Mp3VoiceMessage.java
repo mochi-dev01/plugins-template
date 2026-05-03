@@ -52,9 +52,10 @@ public class Mp3VoiceMessage extends Plugin {
         if (mp3Bytes == null || mp3Bytes.length == 0) throw new Exception("Failed to download MP3");
         long durationMs = getDurationMs(ctx, mp3Bytes);
         double durationSecs = durationMs > 0 ? durationMs / 1000.0 : 1.0;
-        String token = com.aliucord.Http.getDefaultHeaders().get("Authorization");
+        String token = StoreStream.getUsers().getMe().getToken();
         String filename = "voice-message.ogg";
-        String endpoint = BASE_URL + "/channels/" + channelId + "/messages";
+        long channelIdLong = channelId;
+        String endpoint = BASE_URL + "/channels/" + channelIdLong + "/messages";
         String boundary = "----WebKitFormBoundary" + UUID.randomUUID().toString().replace("-", "");
         org.json.JSONObject attachmentBody = new org.json.JSONObject();
         attachmentBody.put("id", "0");
@@ -65,7 +66,7 @@ public class Mp3VoiceMessage extends Plugin {
         attachments.put(attachmentBody);
         org.json.JSONObject payload = new org.json.JSONObject();
         payload.put("flags", VOICE_MESSAGE_FLAG);
-        payload.put("channel_id", channelId);
+        payload.put("channel_id", String.valueOf(channelIdLong));
         payload.put("content", "");
         payload.put("nonce", String.valueOf((System.currentTimeMillis() - 1420070400000L) << 22));
         payload.put("type", 0);
@@ -76,6 +77,7 @@ public class Mp3VoiceMessage extends Plugin {
         conn.setRequestProperty("Authorization", token);
         conn.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
         conn.setRequestProperty("User-Agent", "Discord-Android/175207;RNA");
+        conn.setRequestProperty("X-Super-Properties", "eyJvcyI6IkFuZHJvaWQiLCJicm93c2VyIjoiRGlzY29yZCBBbmRyb2lkIn0=");
         OutputStream out = conn.getOutputStream();
         out.write(("--" + boundary + "\r\nContent-Disposition: form-data; name=\"payload_json\"\r\n\r\n" + payload + "\r\n").getBytes(StandardCharsets.UTF_8));
         out.write(("--" + boundary + "\r\nContent-Disposition: form-data; name=\"files[0]\"; filename=\"" + filename + "\"\r\nContent-Type: audio/mpeg\r\n\r\n").getBytes(StandardCharsets.UTF_8));
